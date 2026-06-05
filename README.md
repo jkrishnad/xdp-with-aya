@@ -1,56 +1,47 @@
 # xdp
 
-## Prerequisites
+An aya-based XDP program. Built and run on a remote Linux box over SSH (the
+local machine is macOS, which can't load XDP), orchestrated by the `xtask`.
 
-1. stable rust toolchains: `rustup toolchain install stable`
-1. nightly rust toolchains: `rustup toolchain install nightly --component rust-src`
-1. (if cross-compiling) rustup target: `rustup target add ${ARCH}-unknown-linux-musl`
-1. (if cross-compiling) LLVM: (e.g.) `brew install llvm` (on macOS)
-1. bpf-linker: `cargo install bpf-linker` (`--no-default-features` on macOS)
+## Prerequisites (local / macOS)
+
+- Rust stable + the `xtask` workspace member (already in this repo)
+- An SSH key that can reach the remote box
+- `rsync` and `ssh` (preinstalled on macOS)
+
+## Remote box
+
+A Linux server (Ubuntu 24.04 tested) reachable over SSH. Connection details
+are set as constants at the top of `xtask/src/main.rs`:
+
+- `SSH_HOST` — e.g. `root@<ip>`
+- `SSH_KEY` — absolute path to your private key
+- `LOCAL_DIR` / `REMOTE_DIR` — code paths on each side
 
 ## Build & Run
 
-Use `cargo build`, `cargo check`, etc. as normal. Run your program with:
+One-time, installs the toolchain (rust nightly + rust-src + bpf-linker) on
+the remote.
 
-```shell
-cargo run --release
+```
+cd xtask
+
+cargo xtask setup
 ```
 
-Cargo build scripts are used to automatically build the eBPF correctly and include it in the
-program.
+Then sync + build + run, attaching the XDP program to an interface:
 
-## Cross-compiling on macOS
-
-Cross compilation should work on both Intel and Apple Silicon Macs.
-
-```shell
-cargo build --package xdp --release \
-  --target=${ARCH}-unknown-linux-musl \
-  --config=target.${ARCH}-unknown-linux-musl.linker=\"rust-lld\"
 ```
-The cross-compiled program `target/${ARCH}-unknown-linux-musl/release/xdp` can be
-copied to a Linux server or VM and run there.
+cargo xtask run -i lo
+```
+
+`xtask` rsyncs the code to the remote, builds it there (the build script
+compiles the eBPF automatically), and runs the program on the chosen
+interface. Ctrl-C to stop.
+
+Other tasks: `cargo xtask build`, `cargo xtask check`, `cargo xtask sync`,
+`cargo xtask ssh` (interactive shell on the remote).
 
 ## License
 
-With the exception of eBPF code, xdp is distributed under the terms
-of either the [MIT license] or the [Apache License] (version 2.0), at your
-option.
-
-Unless you explicitly state otherwise, any contribution intentionally submitted
-for inclusion in this crate by you, as defined in the Apache-2.0 license, shall
-be dual licensed as above, without any additional terms or conditions.
-
-### eBPF
-
-All eBPF code is distributed under either the terms of the
-[GNU General Public License, Version 2] or the [MIT license], at your
-option.
-
-Unless you explicitly state otherwise, any contribution intentionally submitted
-for inclusion in this project by you, as defined in the GPL-2 license, shall be
-dual licensed as above, without any additional terms or conditions.
-
-[Apache license]: LICENSE-APACHE
-[MIT license]: LICENSE-MIT
-[GNU General Public License, Version 2]: LICENSE-GPL2
+Dual MIT / Apache-2.0.
