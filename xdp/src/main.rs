@@ -1,5 +1,10 @@
+use std::net::Ipv4Addr;
+
 use anyhow::Context as _;
-use aya::programs::{Xdp, XdpMode};
+use aya::{
+    maps::{HashMap, IterableMap},
+    programs::{Xdp, XdpMode},
+};
 use clap::Parser;
 #[rustfmt::skip]
 use log::{debug, warn};
@@ -57,6 +62,13 @@ async fn main() -> anyhow::Result<()> {
     program.load()?;
     program.attach(&iface, XdpMode::default())
         .context("failed to attach the XDP program with default mode - try changing XdpMode::default() to XdpMode::Skb")?;
+
+    let mut blocklist: HashMap<_, u32, u32> =
+        HashMap::try_from(ebpf.map_mut("BLOCKLIST").unwrap())?;
+
+    let block_addr: u32 = Ipv4Addr::new(1, 1, 1, 1).into();
+
+    blocklist.insert(block_addr, 0, 0)?;
 
     let ctrl_c = signal::ctrl_c();
     println!("Waiting for Ctrl-C...");

@@ -3,7 +3,12 @@
 
 use core::mem;
 
-use aya_ebpf::{bindings::xdp_action, macros::xdp, programs::XdpContext};
+use aya_ebpf::{
+    bindings::xdp_action,
+    macros::{map, xdp},
+    maps::HashMap,
+    programs::XdpContext,
+};
 use aya_log_ebpf::info;
 use network_types::{
     eth::{EthHdr, EtherType},
@@ -12,12 +17,19 @@ use network_types::{
     udp::UdpHdr,
 };
 
+#[map]
+static BLOCKLIST: HashMap<u32, u32> = HashMap::<u32, u32>::with_max_entries(1024, 0);
+
 #[xdp]
 pub fn xdp_filter(ctx: XdpContext) -> u32 {
     match try_xdp_filter(ctx) {
         Ok(ret) => ret,
         Err(_) => xdp_action::XDP_ABORTED,
     }
+}
+
+pub fn block_ip(address: u32) -> bool {
+    unsafe { BLOCKLIST.get(&address).is_some() }
 }
 
 #[inline(always)]
@@ -51,12 +63,21 @@ fn try_xdp_filter(ctx: XdpContext) -> Result<u32, u32> {
     let source_addr = u32::from_be_bytes(unsafe { (*ipv4hdr).src_addr });
     info!(&ctx, "source_addr: {}", source_addr);
 
+    if block_ip(source_addr) {
+        info!(&ctx, "BLOCKED: {:i}", source_addr);
+        return Ok(xdp_action::XDP_DROP);
+    }
+
     // Next protocol box
     let proto = unsafe { (*ipv4hdr).proto() }
         .map_err(|IpError::InvalidProto(_proto)| xdp_action::XDP_ABORTED)?;
 
     // Source port from where the packet was sent
     let source_port = match proto {
+        IpProto::Icmp => {
+            info!(&ctx, "ICMP from {:i}", source_addr);
+            return Ok(xdp_action::XDP_PASS);
+        }
         IpProto::Tcp => {
             let tcp_hdr: *const TcpHdr = ptr_at(&ctx, EthHdr::LEN + Ipv4Hdr::LEN)?;
             u16::from_be_bytes(unsafe { (*tcp_hdr).source })
@@ -69,6 +90,7 @@ fn try_xdp_filter(ctx: XdpContext) -> Result<u32, u32> {
     };
 
     info!(&ctx, "SRC IP: {:i}, SRC PORT: {}", source_addr, source_port);
+
     Ok(xdp_action::XDP_PASS)
 }
 
